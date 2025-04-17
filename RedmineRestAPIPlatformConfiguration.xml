@@ -1,0 +1,135 @@
+<RestPlugin>
+    <!-- Parameters define reusable parameters that can be referenced throughout the plugin configuration -->
+    <Parameters>
+        <!-- AddressWithValidation is a parameter that applies a validation pattern to Address. The {{AddressValidationPattern}} is a platform parameter -->
+        <Parameter name="AddressWithValidation" validationPattern="{{AddressValidationPattern}}">{{Address}}</Parameter>
+        <!-- URLs used for API calls that reference AddressWithValidation parameter-->
+        <Parameter name="VerifyURL">{{AddressWithValidation}}/my/account.json</Parameter>
+        <Parameter name="LogoffURL">{{AddressWithValidation}}/Logoff</Parameter>
+		<Parameter name="GetUserIdURL">{{AddressWithValidation}}/users.json?name={{Username|urlEncode}}</Parameter>
+		<Parameter name="authToken">{{logonaccount\password}}</Parameter>
+		
+    </Parameters>
+    
+    <!-- ErrorMessages section can store custom error messages but is currently empty -->
+    <ErrorMessages></ErrorMessages>
+	<APICalls>
+		<APICall>
+			<Request name="GetUserId" method="GET">
+                <URL>{{GetUserIdURL}}</URL>
+                <Headers>
+                    <Header key="Content-Type">application/json</Header>
+                    <Header key="X-Redmine-API-Key">{{authToken}}</Header>
+                </Headers>
+                <Body></Body>
+            </Request>
+            <Responses>
+                <!-- Logoff successful response -->
+                <Response name="GetUserIdSuccess" type="valid" statusCode="200" format="json" >
+                    <Parse>
+						<ParseBody>
+							<Parameter name="UserId" path="users[0].id" />
+							<Parameter name="ChangeURL">{{AddressWithValidation}}/users/{{UserId|urlEncode}}.json</Parameter>
+						</ParseBody>
+					</Parse>
+                </Response>
+            </Responses>
+        </APICall>
+    
+    <!-- APICalls define HTTP requests and expected responses for API operations -->
+        <APICall>
+            <Request name="VerifyLogon" method="GET">
+                <URL>{{VerifyURL}}</URL>
+                <Headers>
+                    <Header key="Content-Type">application/json</Header>
+                    <Header key="X-Redmine-API-Key">{{authToken}}</Header>
+                </Headers>
+                <Body>
+                </Body>
+            </Request>
+            <Responses>
+                <Response name="VerifySuccess" type="valid" format="json" statusCode="200" />
+                <!-- Incorrect password response, extracts error details -->
+                <Response name="IncorrectPassword" type="error" statusCode="403">
+                    <Parse>
+                        <ParseBody>
+                            <Parameter name="ErrorCode" path="ErrorCode"/>
+                            <Parameter name="ErrorMessage" path="ErrorMessage"/>
+                        </ParseBody>
+                    </Parse>
+					<!-- This error message is returned to CPM -->
+                    <ErrorMessage name="IncorrectPasswordMsg" returnCode="2001" description="{{ErrorCode}}, {{ErrorMessage}}"/>
+                </Response>
+            </Responses>
+        </APICall>
+        
+        <APICall>
+            <!-- ChangeLogon request: Allows changing user passwords -->
+            <Request name="ChangeLogon" method="PUT">
+                <URL>{{ChangeURL}}</URL>
+                <Headers>
+                    <Header key="Content-Type">application/json</Header>
+					<Header key="X-Redmine-API-Key">{{authToken}}</Header>
+                </Headers>
+                <Body>
+				{
+				"user": {
+					"password": "{{NewPassword|JsonEscape}}" 
+						}
+				}
+                </Body>
+            </Request>
+            <Responses>			
+                <Response name="Success" type="valid" statusCode="204"/>
+                <Response name="IncorrectPassword"/>
+                <!-- Error response if the new password is invalid -->
+                <Response name="InvalidNewPassword" type="error" statusCode="400">
+                    <Parse>
+                        <ParseBody>
+                            <Parameter name="ErrorCode" path="ErrorCode"/>
+                            <Parameter name="ErrorMessage" path="ErrorMessage"/>
+                        </ParseBody>
+                    </Parse>
+                    <ErrorMessage name="InvalidNewPasswordMsg" returnCode="2002" description="{{ErrorCode}}, {{ErrorMessage}}"/>
+                </Response>
+            </Responses>
+        </APICall>
+
+
+        <APICall>
+            <!-- ReconcileLogon request: Uses a privileged account to reset passwords -->
+            <Request name="ReconcileLogon" method="POST">
+                <URL>{{ReconcileURL}}</URL>
+                <Headers>
+                    <Header key="Content-Type">application/json</Header>
+                </Headers>
+                <Body>
+                    {"Username": "{{reconcileaccount\Username}}", 
+                    "Password": "{{reconcileaccount\Password|JsonEscape}}", 
+                    "NewPassword":"{{NewPassword|JsonEscape}}"}
+                </Body>
+            </Request>
+            <Responses>
+                <Response name="Success"/>
+                <Response name="IncorrectPassword"/>
+                <Response name="InvalidNewPassword"/>
+            </Responses>
+        </APICall>
+    </APICalls>
+
+
+    <!-- Chains define sequences of API calls to execute in a specific order -->
+    <Chains>
+        <Chain name="verifypass">
+            <Request name="VerifyLogon" />
+        </Chain>
+        <Chain name="changepass">
+			<Request name="GetUserId" />
+            <Request name="ChangeLogon" />
+        </Chain>
+        <Chain name="reconcilepass">
+            <Request name="ReconcileLogon" />
+        </Chain>
+    </Chains>
+</RestPlugin>
+
